@@ -1,5 +1,5 @@
 import { Activity, LayoutDashboard, Settings, Users, Stethoscope, ShieldAlert } from "lucide-react";
-import { cn } from "../lib/utils";
+import { cn } from "../utils/utils";
 
 interface SidebarProps {
   currentView: string;

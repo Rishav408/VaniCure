@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
-import { Dashboard } from "./views/Dashboard";
-import { DiagnosticAgent } from "./views/DiagnosticAgent";
-import { PatientRecords } from "./views/PatientRecords";
-import { OutbreakAlerts } from "./views/OutbreakAlerts";
-import { EdgeSettings } from "./views/EdgeSettings";
+import { Dashboard } from "./pages/Dashboard";
+import { DiagnosticAgent } from "./pages/DiagnosticAgent";
+import { PatientRecords } from "./pages/PatientRecords";
+import { OutbreakAlerts } from "./pages/OutbreakAlerts";
+import { EdgeSettings } from "./pages/EdgeSettings";
 
 export default function App() {
   const [currentView, setCurrentView] = useState("dashboard");
