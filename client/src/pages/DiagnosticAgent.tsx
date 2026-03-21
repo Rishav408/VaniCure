@@ -21,6 +21,8 @@ export function DiagnosticAgent() {
   const [messages, setMessages] = useState([
     { role: "ai", text: "नमस्ते। मैं VaniCure हूँ। क्या आप मुझे अपनी खांसी और लक्षणों के बारे में बता सकते हैं? (Hello. I am VaniCure. Can you tell me about your cough and symptoms?)" }
   ]);
+  // useRef tracks message count to avoid stale closure inside setTimeout
+  const userMessageCountRef = useRef(0);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [modelResults, setModelResults] = useState<ModelDisplayResult[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -168,14 +170,26 @@ export function DiagnosticAgent() {
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
-    setMessages(prev => [...prev, { role: "user", text: chatInput }]);
+    const userText = chatInput;
     setChatInput("");
 
-    setTimeout(() => {
-      setMessages(prev => [...prev, { role: "ai", text: "धन्यवाद। क्या आपको रात में पसीना आता है या वजन कम हुआ है? (Thank you. Do you experience night sweats or weight loss?)" }]);
+    // Add user message
+    setMessages(prev => [...prev, { role: "user", text: userText }]);
+    userMessageCountRef.current += 1;
+    const count = userMessageCountRef.current;
 
-      if (messages.length > 2) {
-        setTimeout(() => setStage("result"), 2000);
+    // Different AI replies per exchange
+    const aiReplies = [
+      "धन्यवाद। क्या आपको रात में पसीना आता है या वजन कम हुआ है? (Thank you. Do you experience night sweats or weight loss?)",
+      "समझ गया। आपके लक्षणों की समीक्षा की जा रही है। (Understood. Reviewing your symptoms now...)",
+    ];
+    const reply = aiReplies[Math.min(count - 1, aiReplies.length - 1)];
+
+    setTimeout(() => {
+      setMessages(prev => [...prev, { role: "ai", text: reply }]);
+      // Advance to result stage after 2 user messages
+      if (count >= 2) {
+        setTimeout(() => setStage("result"), 1200);
       }
     }, 1000);
   };
@@ -576,7 +590,14 @@ export function DiagnosticAgent() {
 
                   <div className="mt-6 flex gap-3 relative z-10">
                     <button 
-                      onClick={() => { setStage("idle"); setModelResults([]); setProgress(0); setRecordingDuration(0); }}
+                      onClick={() => {
+                        setStage("idle");
+                        setModelResults([]);
+                        setProgress(0);
+                        setRecordingDuration(0);
+                        userMessageCountRef.current = 0;
+                        setMessages([{ role: "ai", text: "नमस्ते। मैं VaniCure हूँ। क्या आप मुझे अपनी खांसी और लक्षणों के बारे में बता सकते हैं? (Hello. I am VaniCure. Can you tell me about your cough and symptoms?)" }]);
+                      }}
                       className="flex-1 py-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white text-sm font-medium transition-colors border border-zinc-200 dark:border-white/5"
                     >
                       New Screening
