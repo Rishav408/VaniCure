@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { Mic, Square, Activity, Cpu, Stethoscope, FileText, CheckCircle2, AlertTriangle, Send, Volume2, Wifi, WifiOff } from "lucide-react";
+import { Mic, Square, Activity, Cpu, Stethoscope, FileText, CheckCircle2, AlertTriangle, Send, Volume2, Wifi, WifiOff, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { predictAudio, checkHealth, type PredictResponse } from "../services/api";
+import { saveScreening } from "../store/screeningStore";
 
 type Stage = "idle" | "recording" | "processing" | "triage" | "result";
 
@@ -14,10 +15,11 @@ interface ModelDisplayResult {
   available: boolean;
 }
 
-export function DiagnosticAgent() {
+export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) => void }) {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
   const [chatInput, setChatInput] = useState("");
+  const [saved, setSaved] = useState(false);
   const [messages, setMessages] = useState([
     { role: "ai", text: "नमस्ते। मैं VaniCure हूँ। क्या आप मुझे अपनी खांसी और लक्षणों के बारे में बता सकते हैं? (Hello. I am VaniCure. Can you tell me about your cough and symptoms?)" }
   ]);
@@ -602,8 +604,41 @@ export function DiagnosticAgent() {
                     >
                       New Screening
                     </button>
-                    <button className="flex-1 py-2.5 rounded-xl bg-medical-500 hover:bg-medical-600 dark:hover:bg-medical-400 text-white dark:text-zinc-950 text-sm font-semibold transition-colors shadow-lg shadow-medical-500/20">
-                      Save to Records
+                    <button
+                      onClick={() => {
+                        if (saved) {
+                          onNavigate?.("records");
+                          return;
+                        }
+                        const available = modelResults.filter(r => r.available);
+                        const avgTb = available.reduce((s, r) => s + r.tb_risk, 0) / available.length;
+                        const avgAsthma = available.reduce((s, r) => s + r.asthma_risk, 0) / available.length;
+                        const avgNormal = available.reduce((s, r) => s + r.normal, 0) / available.length;
+                        let result = "Normal";
+                        let riskLevel: "critical" | "warning" | "safe" = "safe";
+                        let conf = avgNormal * 100;
+                        if (avgTb > 0.3) { result = "High Risk TB"; riskLevel = "critical"; conf = avgTb * 100; }
+                        else if (avgAsthma > 0.3) { result = "Asthma Pattern"; riskLevel = "warning"; conf = avgAsthma * 100; }
+                        const now = new Date();
+                        saveScreening({
+                          patientName: `Patient ${now.getHours()}${now.getMinutes()}`,
+                          age: 0, gender: "O", location: "Local Device",
+                          date: now.toISOString().split("T")[0],
+                          time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }),
+                          overallResult: result, riskLevel, confidence: parseFloat(conf.toFixed(1)),
+                          models: available.map(r => ({ model: r.model, tb_risk: r.tb_risk, asthma_risk: r.asthma_risk, normal: r.normal, placeholder: r.placeholder })),
+                          audioDurationSec: recordingDuration,
+                          synced: false,
+                        });
+                        setSaved(true);
+                      }}
+                      className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-lg flex items-center justify-center gap-2 ${
+                        saved
+                          ? "bg-emerald-500 text-white shadow-emerald-500/20 cursor-pointer"
+                          : "bg-medical-500 hover:bg-medical-600 dark:hover:bg-medical-400 text-white dark:text-zinc-950 shadow-medical-500/20"
+                      }`}
+                    >
+                      {saved ? <><Check className="w-4 h-4" /> Saved — View Records</> : "Save to Records"}
                     </button>
                   </div>
                 </div>

@@ -22,13 +22,13 @@ export default function App() {
   const renderView = () => {
     switch (currentView) {
       case "dashboard":
-        return <Dashboard />;
+        return <Dashboard onNavigate={setCurrentView} />;
       case "diagnostic":
-        return <DiagnosticAgent />;
+        return <DiagnosticAgent onNavigate={setCurrentView} />;
       case "records":
         return <PatientRecords />;
       case "alerts":
-        return <OutbreakAlerts />;
+        return <OutbreakAlerts onNavigate={setCurrentView} />;
       case "settings":
         return <EdgeSettings />;
       default:
