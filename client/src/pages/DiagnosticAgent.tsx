@@ -1,8 +1,18 @@
-import { useState, useEffect } from "react";
-import { Mic, Square, Activity, Cpu, Stethoscope, FileText, CheckCircle2, AlertTriangle, Send, Volume2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Mic, Square, Activity, Cpu, Stethoscope, FileText, CheckCircle2, AlertTriangle, Send, Volume2, Wifi, WifiOff } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { predictAudio, checkHealth, type PredictResponse } from "../services/api";
 
 type Stage = "idle" | "recording" | "processing" | "triage" | "result";
+
+interface ModelDisplayResult {
+  model: string;
+  tb_risk: number;
+  asthma_risk: number;
+  normal: number;
+  placeholder?: boolean;
+  available: boolean;
+}
 
 export function DiagnosticAgent() {
   const [stage, setStage] = useState<Stage>("idle");
@@ -11,50 +21,217 @@ export function DiagnosticAgent() {
   const [messages, setMessages] = useState([
     { role: "ai", text: "नमस्ते। मैं VaniCure हूँ। क्या आप मुझे अपनी खांसी और लक्षणों के बारे में बता सकते हैं? (Hello. I am VaniCure. Can you tell me about your cough and symptoms?)" }
   ]);
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
+  const [modelResults, setModelResults] = useState<ModelDisplayResult[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState(0);
 
-  // Simulated processing pipeline
+  // MediaRecorder refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Check backend health on mount
+  useEffect(() => {
+    checkHealth().then(setBackendOnline);
+  }, []);
+
+  // Progress animation during processing
   useEffect(() => {
     if (stage === "processing") {
       let currentProgress = 0;
       const interval = setInterval(() => {
-        currentProgress += 2;
+        currentProgress += 1;
         setProgress(currentProgress);
         if (currentProgress >= 100) {
           clearInterval(interval);
-          setTimeout(() => setStage("triage"), 500);
         }
-      }, 50);
+      }, 80);
       return () => clearInterval(interval);
     }
   }, [stage]);
 
+  // Recording timer
+  useEffect(() => {
+    if (stage === "recording") {
+      setRecordingDuration(0);
+      timerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [stage]);
+
+  const startRecording = async () => {
+    setErrorMessage(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all audio tracks
+        stream.getTracks().forEach(track => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        await processAudio(audioBlob);
+      };
+
+      mediaRecorder.start(250); // Collect data every 250ms
+      setStage("recording");
+    } catch (err: any) {
+      setErrorMessage(
+        err.name === "NotAllowedError"
+          ? "Microphone access denied. Please allow microphone permission and try again."
+          : `Failed to access microphone: ${err.message}`
+      );
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+      setStage("processing");
+      setProgress(0);
+    }
+  };
+
+  const processAudio = async (audioBlob: Blob) => {
+    try {
+      const response: PredictResponse = await predictAudio(audioBlob);
+
+      const results: ModelDisplayResult[] = [
+        {
+          model: response.panns.model || "PANNs-CNN14",
+          tb_risk: response.panns.tb_risk,
+          asthma_risk: response.panns.asthma_risk,
+          normal: response.panns.normal,
+          placeholder: response.panns.placeholder,
+          available: true,
+        },
+        {
+          model: response.yamnet.model || "YAMNet",
+          tb_risk: response.yamnet.tb_risk,
+          asthma_risk: response.yamnet.asthma_risk,
+          normal: response.yamnet.normal,
+          placeholder: response.yamnet.placeholder,
+          available: true,
+        },
+        {
+          model: "CNN-BiLSTM (Your Model)",
+          tb_risk: 0,
+          asthma_risk: 0,
+          normal: 0,
+          placeholder: true,
+          available: false,
+        },
+      ];
+
+      setModelResults(results);
+      setProgress(100);
+      setTimeout(() => setStage("triage"), 600);
+    } catch (err: any) {
+      setErrorMessage(
+        err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
+          ? "Backend unreachable. Please start the server: cd server && uvicorn main:app --port 8000"
+          : `Analysis failed: ${err.message}`
+      );
+      setStage("idle");
+    }
+  };
+
   const handleRecordToggle = () => {
-    if (stage === "idle") setStage("recording");
-    else if (stage === "recording") setStage("processing");
+    if (stage === "idle") startRecording();
+    else if (stage === "recording") stopRecording();
   };
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
     setMessages(prev => [...prev, { role: "user", text: chatInput }]);
     setChatInput("");
-    
-    // Simulate AI response
+
     setTimeout(() => {
       setMessages(prev => [...prev, { role: "ai", text: "धन्यवाद। क्या आपको रात में पसीना आता है या वजन कम हुआ है? (Thank you. Do you experience night sweats or weight loss?)" }]);
-      
-      // After second message, move to results
+
       if (messages.length > 2) {
         setTimeout(() => setStage("result"), 2000);
       }
     }, 1000);
   };
 
+  const getHighestRisk = (): { label: string; level: string; color: string } => {
+    if (modelResults.length === 0) return { label: "Unknown", level: "low", color: "zinc" };
+    const available = modelResults.filter(r => r.available);
+    const avgTb = available.reduce((s, r) => s + r.tb_risk, 0) / available.length;
+    const avgAsthma = available.reduce((s, r) => s + r.asthma_risk, 0) / available.length;
+
+    if (avgTb > 0.6) return { label: "High Risk", level: "critical", color: "red" };
+    if (avgTb > 0.3) return { label: "Moderate Risk", level: "warning", color: "amber" };
+    return { label: "Low Risk", level: "safe", color: "medical" };
+  };
+
+  const formatPercent = (val: number) => `${(val * 100).toFixed(1)}%`;
+  const formatTime = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+
   return (
     <div className="p-8 h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Diagnostic Agent</h2>
-        <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Offline Cough Analysis & Multilingual Triage</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Diagnostic Agent</h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">Offline Cough Analysis &amp; Multilingual Triage</p>
+        </div>
+        {/* Backend status indicator */}
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+          backendOnline === true
+            ? "bg-medical-50 dark:bg-medical-500/10 text-medical-700 dark:text-medical-400 border-medical-200 dark:border-medical-500/30"
+            : backendOnline === false
+            ? "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/30"
+            : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-zinc-200 dark:border-white/10"
+        }`}>
+          {backendOnline === true ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+          {backendOnline === true ? "AI Server Online" : backendOnline === false ? "AI Server Offline" : "Checking..."}
+        </div>
       </div>
+
+      {/* Error Banner */}
+      <AnimatePresence>
+        {errorMessage && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 text-sm text-red-700 dark:text-red-300 flex items-start gap-3"
+          >
+            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-500" />
+            <div className="flex-1">
+              <p className="font-medium">Error</p>
+              <p className="mt-1 font-mono text-xs">{errorMessage}</p>
+            </div>
+            <button onClick={() => setErrorMessage(null)} className="text-red-400 hover:text-red-600 dark:hover:text-red-200 text-lg leading-none">&times;</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-0">
         
@@ -63,7 +240,6 @@ export function DiagnosticAgent() {
           
           {/* Audio Capture Card */}
           <div className="glass-card p-6 border border-zinc-200 dark:border-white/5 flex flex-col items-center justify-center relative overflow-hidden h-64">
-            {/* Background decorative elements */}
             <div className="absolute inset-0 bg-gradient-to-b from-medical-500/5 to-transparent pointer-events-none" />
             
             <AnimatePresence mode="wait">
@@ -102,7 +278,7 @@ export function DiagnosticAgent() {
                     </button>
                   </div>
                   
-                  {/* Simulated Waveform */}
+                  {/* Live Waveform */}
                   <div className="flex items-end justify-center gap-1 h-16 w-full px-12">
                     {[...Array(40)].map((_, i) => (
                       <div 
@@ -116,7 +292,9 @@ export function DiagnosticAgent() {
                       />
                     ))}
                   </div>
-                  <p className="text-sm text-medical-600 dark:text-medical-400 mt-4 font-mono animate-pulse">Recording... 00:04</p>
+                  <p className="text-sm text-medical-600 dark:text-medical-400 mt-4 font-mono animate-pulse">
+                    Recording... {formatTime(recordingDuration)}
+                  </p>
                 </motion.div>
               )}
 
@@ -130,9 +308,9 @@ export function DiagnosticAgent() {
                     <Volume2 className="w-6 h-6 text-medical-600 dark:text-medical-400" />
                   </div>
                   <h3 className="text-lg font-medium text-zinc-900 dark:text-white">Audio Captured</h3>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 font-mono">Duration: 4.2s | Format: WAV 16kHz</p>
+                  <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 font-mono">Duration: {formatTime(recordingDuration)} | Format: WebM/Opus</p>
                   
-                  {/* Static Spectrogram representation */}
+                  {/* Static Spectrogram */}
                   <div className="w-full h-12 mt-6 rounded-lg overflow-hidden flex">
                     {[...Array(50)].map((_, i) => (
                       <div key={i} className="flex-1 flex flex-col gap-px">
@@ -161,19 +339,18 @@ export function DiagnosticAgent() {
           <div className="glass-card p-6 border border-zinc-200 dark:border-white/5 flex-1 flex flex-col relative overflow-hidden">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-6 flex items-center gap-2">
               <Cpu className="w-4 h-4 text-medical-600 dark:text-medical-400" />
-              CNN-BiLSTM Pipeline (Offline)
+              Multi-Model Pipeline (PANNs + YAMNet)
             </h3>
             
             <div className="flex-1 flex flex-col justify-center gap-6 relative">
-              {/* Connecting Line */}
               <div className="absolute left-6 top-4 bottom-4 w-px bg-zinc-200 dark:bg-zinc-800" />
               
               {[
-                { id: 1, title: "Spectro-Temporal Analysis", desc: "Mel-Spectrogram generation (500ms segments)", active: progress > 0, done: progress > 30 },
-                { id: 2, title: "Spatial Feature Extraction", desc: "CNN identifying wheezes/crackles", active: progress > 30, done: progress > 60 },
-                { id: 3, title: "Temporal Modeling", desc: "BiLSTM capturing respiratory cycles", active: progress > 60, done: progress > 90 },
-                { id: 4, title: "INT8 Edge Inference", desc: "TFLite sub-millisecond classification", active: progress > 90, done: progress >= 100 },
-              ].map((step, i) => (
+                { id: 1, title: "Audio Preprocessing", desc: "Resampling to 32kHz/16kHz, mono conversion", active: progress > 0, done: progress > 25 },
+                { id: 2, title: "PANNs CNN14 Inference", desc: "AudioSet-pretrained large-scale audio tagging", active: progress > 25, done: progress > 50 },
+                { id: 3, title: "YAMNet Inference", desc: "MobileNet-based audio event classification", active: progress > 50, done: progress > 75 },
+                { id: 4, title: "Risk Aggregation", desc: "Combining scores from both models", active: progress > 75, done: progress >= 100 },
+              ].map((step) => (
                 <div key={step.id} className="relative flex items-start gap-4 z-10">
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors duration-500 ${
                     step.done ? "bg-medical-50 dark:bg-medical-500/20 border border-medical-200 dark:border-medical-500/50 text-medical-600 dark:text-medical-400" :
@@ -188,7 +365,7 @@ export function DiagnosticAgent() {
                     
                     {step.active && !step.done && (
                       <div className="h-1 w-32 bg-zinc-200 dark:bg-zinc-800 rounded-full mt-3 overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: `${(progress % 30) / 30 * 100}%` }} />
+                        <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: `${(progress % 25) / 25 * 100}%` }} />
                       </div>
                     )}
                   </div>
@@ -196,7 +373,6 @@ export function DiagnosticAgent() {
               ))}
             </div>
             
-            {/* Scanline effect when processing */}
             {stage === "processing" && (
               <div className="absolute inset-0 bg-gradient-to-b from-transparent via-medical-500/5 to-transparent h-1/2 animate-scanline pointer-events-none" />
             )}
@@ -207,7 +383,7 @@ export function DiagnosticAgent() {
         <div className="flex flex-col gap-6">
           
           {/* SLM Triage Chat */}
-          <div className={`glass-card border border-zinc-200 dark:border-white/5 flex flex-col transition-all duration-500 ${stage === "result" ? "h-64" : "flex-1"}`}>
+          <div className={`glass-card border border-zinc-200 dark:border-white/5 flex flex-col transition-all duration-500 ${stage === "result" ? "h-48" : "flex-1"}`}>
             <div className="p-4 border-b border-zinc-200 dark:border-white/5 flex items-center justify-between bg-[#FAFAFA] dark:bg-zinc-900/50 rounded-t-2xl">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/30 flex items-center justify-center">
@@ -273,73 +449,142 @@ export function DiagnosticAgent() {
             </div>
           </div>
 
-          {/* Final Result Card */}
+          {/* Model Comparison + Final Result Card */}
           <AnimatePresence>
             {stage === "result" && (
               <motion.div 
                 initial={{ opacity: 0, height: 0, y: 20 }}
                 animate={{ opacity: 1, height: "auto", y: 0 }}
-                className="glass-card p-6 border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/5 relative overflow-hidden"
+                className="flex flex-col gap-6"
               >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-red-100 dark:bg-red-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
-                
-                <div className="flex items-start justify-between mb-6 relative z-10">
-                  <div>
-                    <h3 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                      <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-500" />
-                      Diagnostic Risk Summary
-                    </h3>
-                    <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Synthesized from acoustic & verbal data</p>
-                  </div>
-                  <div className="px-3 py-1 rounded-full bg-red-100 dark:bg-red-500/20 border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold tracking-wide uppercase">
-                    High Risk
-                  </div>
-                </div>
-
-                <div className="space-y-4 relative z-10">
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-zinc-700 dark:text-zinc-300">Tuberculosis (TB) Probability</span>
-                      <span className="text-red-600 dark:text-red-400 font-mono font-bold">87.4%</span>
-                    </div>
-                    <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-red-500 to-red-400 w-[87.4%]" />
-                    </div>
-                  </div>
+                {/* Model Comparison Table */}
+                <div className="glass-card p-6 border border-zinc-200 dark:border-white/5 relative overflow-hidden">
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-4 flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-medical-600 dark:text-medical-400" />
+                    Model Comparison
+                  </h3>
                   
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-zinc-700 dark:text-zinc-300">Asthma / COPD Probability</span>
-                      <span className="text-amber-600 dark:text-amber-400 font-mono font-bold">12.1%</span>
-                    </div>
-                    <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-amber-500 w-[12.1%]" />
-                    </div>
+                  <div className="space-y-4">
+                    {modelResults.map((result, i) => (
+                      <div 
+                        key={i} 
+                        className={`p-4 rounded-xl border transition-colors ${
+                          !result.available 
+                            ? "bg-zinc-50 dark:bg-zinc-900/30 border-dashed border-zinc-300 dark:border-zinc-700 opacity-50"
+                            : "bg-white dark:bg-zinc-900/50 border-zinc-200 dark:border-white/5"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${
+                              !result.available ? "bg-zinc-400" :
+                              result.placeholder ? "bg-amber-500 animate-pulse" : "bg-medical-500"
+                            }`} />
+                            <span className="text-sm font-medium text-zinc-900 dark:text-white">{result.model}</span>
+                          </div>
+                          {!result.available ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-200 dark:bg-zinc-800 text-zinc-500 font-medium">Coming Soon</span>
+                          ) : result.placeholder ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 font-medium">Placeholder</span>
+                          ) : (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-medical-100 dark:bg-medical-500/20 text-medical-600 dark:text-medical-400 font-medium">Live</span>
+                          )}
+                        </div>
+
+                        {result.available ? (
+                          <div className="space-y-2">
+                            <div>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="text-zinc-500">TB Risk</span>
+                                <span className="font-mono font-bold text-red-500">{formatPercent(result.tb_risk)}</span>
+                              </div>
+                              <div className="h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-red-500 to-red-400 rounded-full transition-all duration-1000" style={{ width: formatPercent(result.tb_risk) }} />
+                              </div>
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="text-zinc-500">Asthma/COPD</span>
+                                <span className="font-mono font-bold text-amber-500">{formatPercent(result.asthma_risk)}</span>
+                              </div>
+                              <div className="h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-amber-500 rounded-full transition-all duration-1000" style={{ width: formatPercent(result.asthma_risk) }} />
+                              </div>
+                            </div>
+                            <div>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="text-zinc-500">Normal</span>
+                                <span className="font-mono font-bold text-medical-500">{formatPercent(result.normal)}</span>
+                              </div>
+                              <div className="h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-medical-500 rounded-full transition-all duration-1000" style={{ width: formatPercent(result.normal) }} />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">Build your own CNN-BiLSTM model and plug it in here.</p>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                <div className="mt-6 p-4 rounded-xl bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-white/5 relative z-10">
-                  <h4 className="text-sm font-semibold text-zinc-900 dark:text-white mb-2 flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-medical-600 dark:text-medical-400" />
-                    Actionable Next Steps
-                  </h4>
-                  <ul className="text-sm text-zinc-600 dark:text-zinc-300 space-y-2 list-disc pl-4 marker:text-medical-500">
-                    <li>Immediate referral to District Hospital for Sputum Smear Microscopy.</li>
-                    <li>Isolate patient and provide N95 mask.</li>
-                    <li>Log case in National Health Mission portal (Auto-sync pending connection).</li>
-                  </ul>
-                </div>
+                {/* Aggregated Risk Summary */}
+                <div className={`glass-card p-6 border relative overflow-hidden ${
+                  getHighestRisk().level === "critical" 
+                    ? "border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/5" 
+                    : getHighestRisk().level === "warning"
+                    ? "border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/5"
+                    : "border-medical-200 dark:border-medical-500/30 bg-medical-50 dark:bg-medical-500/5"
+                }`}>
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-red-100 dark:bg-red-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
+                  
+                  <div className="flex items-start justify-between mb-6 relative z-10">
+                    <div>
+                      <h3 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                        <AlertTriangle className={`w-5 h-5 ${
+                          getHighestRisk().level === "critical" ? "text-red-600 dark:text-red-500" : 
+                          getHighestRisk().level === "warning" ? "text-amber-600 dark:text-amber-500" : 
+                          "text-medical-600 dark:text-medical-500"
+                        }`} />
+                        Aggregated Risk Summary
+                      </h3>
+                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Average across {modelResults.filter(r => r.available).length} active models</p>
+                    </div>
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase border ${
+                      getHighestRisk().level === "critical"
+                        ? "bg-red-100 dark:bg-red-500/20 border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400"
+                        : getHighestRisk().level === "warning"
+                        ? "bg-amber-100 dark:bg-amber-500/20 border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-400"
+                        : "bg-medical-100 dark:bg-medical-500/20 border-medical-200 dark:border-medical-500/30 text-medical-600 dark:text-medical-400"
+                    }`}>
+                      {getHighestRisk().label}
+                    </div>
+                  </div>
 
-                <div className="mt-6 flex gap-3 relative z-10">
-                  <button 
-                    onClick={() => setStage("idle")}
-                    className="flex-1 py-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white text-sm font-medium transition-colors border border-zinc-200 dark:border-white/5"
-                  >
-                    New Screening
-                  </button>
-                  <button className="flex-1 py-2.5 rounded-xl bg-medical-500 hover:bg-medical-600 dark:hover:bg-medical-400 text-white dark:text-zinc-950 text-sm font-semibold transition-colors shadow-lg shadow-medical-500/20">
-                    Save to Records
-                  </button>
+                  <div className="mt-4 p-4 rounded-xl bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-white/5 relative z-10">
+                    <h4 className="text-sm font-semibold text-zinc-900 dark:text-white mb-2 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-medical-600 dark:text-medical-400" />
+                      Actionable Next Steps
+                    </h4>
+                    <ul className="text-sm text-zinc-600 dark:text-zinc-300 space-y-2 list-disc pl-4 marker:text-medical-500">
+                      <li>Immediate referral to District Hospital for Sputum Smear Microscopy.</li>
+                      <li>Isolate patient and provide N95 mask.</li>
+                      <li>Log case in National Health Mission portal (Auto-sync pending connection).</li>
+                    </ul>
+                  </div>
+
+                  <div className="mt-6 flex gap-3 relative z-10">
+                    <button 
+                      onClick={() => { setStage("idle"); setModelResults([]); setProgress(0); setRecordingDuration(0); }}
+                      className="flex-1 py-2.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white text-sm font-medium transition-colors border border-zinc-200 dark:border-white/5"
+                    >
+                      New Screening
+                    </button>
+                    <button className="flex-1 py-2.5 rounded-xl bg-medical-500 hover:bg-medical-600 dark:hover:bg-medical-400 text-white dark:text-zinc-950 text-sm font-semibold transition-colors shadow-lg shadow-medical-500/20">
+                      Save to Records
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
