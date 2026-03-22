@@ -1,20 +1,39 @@
+# Node & Frontend (Vite)
 node_modules/
-build/
 dist/
+dist-ssr/
+build/
 coverage/
-.DS_Store
-*.log
-.env*
+*.local
+.eslintcache
+
+# Environment
+.env
+.env.*
 !.env.example
+*.log
 
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
+*$py.class
+*.so
+.Python
 .venv/
 venv/
 
-# Model checkpoints + training data (too large for git)
+# Deep Learning Models & Datasets
+# Too large for git — generated via scripts
 server/checkpoints/
 server/data/
-ai/models/
+*.pth
+*.pt
+*.tflite
+*.onnx
+*.npy
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
