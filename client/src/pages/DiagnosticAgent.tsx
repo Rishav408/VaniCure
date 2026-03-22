@@ -143,12 +143,12 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
           available: true,
         },
         {
-          model: "CNN-BiLSTM (Your Model)",
-          tb_risk: 0,
-          asthma_risk: 0,
-          normal: 0,
-          placeholder: true,
-          available: false,
+          model: response.cnn_bilstm?.model || "CNN-BiLSTM",
+          tb_risk: response.cnn_bilstm?.tb_risk ?? 0,
+          asthma_risk: response.cnn_bilstm?.asthma_risk ?? 0,
+          normal: response.cnn_bilstm?.normal ?? 0,
+          placeholder: response.cnn_bilstm?.placeholder ?? true,
+          available: !!response.cnn_bilstm,
         },
       ];
 

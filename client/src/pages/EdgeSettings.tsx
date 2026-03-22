@@ -112,13 +112,34 @@ export function EdgeSettings() {
               </div>
             </div>
 
-            {/* Model 3 Placeholder */}
-            <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-900/30 border border-dashed border-zinc-300 dark:border-zinc-700 opacity-60">
+            {/* Model 3 — CNN-BiLSTM */}
+            <div className="p-4 rounded-xl bg-[#FAFAFA] dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/5">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-sm font-semibold text-zinc-900 dark:text-white">CNN-BiLSTM (Your Model)</h4>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-500">Coming Soon</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-500">Not Trained Yet</span>
               </div>
-              <p className="text-xs text-zinc-400">Build your own respiratory sound classifier and plug it in here.</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">Custom respiratory classifier — CNN spatial encoder + BiLSTM temporal sequence</p>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-zinc-400">Architecture:</span>
+                  <span className="ml-1 text-zinc-700 dark:text-zinc-300">3×CNN + 2-layer BiLSTM</span>
+                </div>
+                <div>
+                  <span className="text-zinc-400">Classes:</span>
+                  <span className="ml-1 text-zinc-700 dark:text-zinc-300">3 (healthy, TB, asthma)</span>
+                </div>
+                <div>
+                  <span className="text-zinc-400">Features:</span>
+                  <span className="ml-1 text-zinc-700 dark:text-zinc-300">Mel + MFCC (168 bins)</span>
+                </div>
+                <div>
+                  <span className="text-zinc-400">Input SR:</span>
+                  <span className="ml-1 text-zinc-700 dark:text-zinc-300">22.05kHz</span>
+                </div>
+              </div>
+              <p className="mt-3 text-[11px] text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 p-2 rounded-lg border border-blue-200 dark:border-blue-500/20">
+                Train with: <code className="font-mono bg-blue-100 dark:bg-blue-500/20 px-1">cd model_training && python train.py</code>
+              </p>
             </div>
           </div>
         </div>

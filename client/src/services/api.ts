@@ -16,10 +16,11 @@ export interface ModelResult {
 export interface PredictResponse {
   panns: ModelResult;
   yamnet: ModelResult;
+  cnn_bilstm: ModelResult;
 }
 
 /**
- * Send an audio blob to the backend for PANNs + YAMNet inference.
+ * Send an audio blob to the backend for PANNs + YAMNet + CNN-BiLSTM inference.
  */
 export async function predictAudio(audioBlob: Blob): Promise<PredictResponse> {
   const formData = new FormData();

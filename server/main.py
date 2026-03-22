@@ -8,9 +8,10 @@ import concurrent.futures
 
 from models.panns_model import predict_panns, _load_model as load_panns
 from models.yamnet_model import predict_yamnet, _load_yamnet
+from models.cnn_bilstm_model import predict_cnn_bilstm, _load_model as load_cnn_bilstm
 
 # Thread pool to run blocking inference off the async event loop
-_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
 
 @asynccontextmanager
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
     await asyncio.gather(
         loop.run_in_executor(_executor, load_panns),
         loop.run_in_executor(_executor, _load_yamnet),
+        loop.run_in_executor(_executor, load_cnn_bilstm),
     )
     print("[Server] ✅ All models ready. Server is hot.")
     yield
@@ -59,10 +61,11 @@ async def predict(file: UploadFile = File(...)):
 
     try:
         loop = asyncio.get_event_loop()
-        # Run both models concurrently — cuts response time roughly in half
-        panns_result, yamnet_result = await asyncio.gather(
+        # Run all 3 models concurrently
+        panns_result, yamnet_result, cnn_result = await asyncio.gather(
             loop.run_in_executor(_executor, predict_panns, tmp_path),
             loop.run_in_executor(_executor, predict_yamnet, tmp_path),
+            loop.run_in_executor(_executor, predict_cnn_bilstm, tmp_path),
         )
     finally:
         os.unlink(tmp_path)
@@ -70,4 +73,5 @@ async def predict(file: UploadFile = File(...)):
     return {
         "panns": panns_result,
         "yamnet": yamnet_result,
+        "cnn_bilstm": cnn_result,
     }
