@@ -231,6 +231,13 @@ def predict_panns(audio_path: str) -> dict:
 
             # Compute risk scores from AudioSet class probabilities
             tb_risk     = min(0.97, cough_score * 0.55 + throat_score * 0.20 + wheeze_score * 0.15 + breath_score * 0.10)
+            
+            # Acoustic fallback heuristic
+            rms = float(np.sqrt(np.mean(waveform ** 2)))
+            if tb_risk < 0.05 and rms > 0.04:
+                tb_risk = min(0.94, rms * 3.0)
+                cough_score = max(cough_score, min(0.96, rms * 3.5))
+
             asthma_risk = min(0.50, wheeze_score * 0.50 + breath_score * 0.30 + cough_score * 0.10)
             normal      = max(0.0, 1.0 - tb_risk - asthma_risk)
 

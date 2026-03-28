@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
-import { AlertTriangle, MapPin, ShieldAlert, Activity, Users, ArrowRight, Stethoscope } from "lucide-react";
+import { AlertTriangle, MapPin, ShieldAlert, Activity, Users, ArrowRight, Stethoscope, CheckCheck } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { getOutbreakAlerts, getStats, getScreenings } from "../store/screeningStore";
 
 export function OutbreakAlerts({ onNavigate }: { onNavigate?: (view: string) => void }) {
   const [alerts, setAlerts] = useState(getOutbreakAlerts());
   const [stats, setStats] = useState(getStats());
   const [regionsAffected, setRegionsAffected] = useState(0);
+  const [acknowledged, setAcknowledged] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     const a = getOutbreakAlerts();
