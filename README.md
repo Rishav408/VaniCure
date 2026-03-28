@@ -220,3 +220,11 @@ Once `cnn_bilstm.pth` appears in the `server/checkpoints/` directory, simply boo
 ---
 
 *VaniCure is built for institutional research and developmental diagnostic screening.*
+![alt text](<Screenshot 2026-03-28 at 5.36.09 PM.png>)
+
+![alt text](<Screenshot 2026-03-28 at 5.36.17 PM.png>)
+
+![alt text](<Screenshot 2026-03-28 at 5.36.24 PM.png>)
+
+![alt text](<Screenshot 2026-03-28 at 5.36.32 PM.png>)
+
