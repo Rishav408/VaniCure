@@ -21,15 +21,14 @@ CHECKPOINT_PATH = os.path.join(
 )
 
 # AudioSet class index mappings relevant to respiratory sounds
-# Based on AudioSet ontology: https://research.google.com/audioset/ontology/
+# Verified against: AudioSet ontology + audioset_tagging_cnn metadata/class_labels_indices.csv
 AUDIOSET_CLASSES = {
-    "cough":       74,
-    "throat_clear": 75,
-    "breathing":   289,
-    "wheeze":      290,
-    "snoring":     291,
-    "sneeze":      73,
-    "speech":      0,
+    "cough":        47,   # "Cough"
+    "throat_clear": 48,   # "Throat clearing"
+    "breathing":    41,   # "Breathing"
+    "wheeze":       42,   # "Wheeze"
+    "sneeze":       49,   # "Sneeze"
+    "speech":        0,   # "Speech"
 }
 
 # Singleton model instance (loaded once at startup)

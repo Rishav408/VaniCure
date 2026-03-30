@@ -81,14 +81,16 @@ def predict_yamnet(audio_path: str) -> dict:
     ]
 
     # Extract respiratory-relevant scores
-    # YAMNet AudioSet class indices (approximate):
-    #   35 = Cough, 33 = Breathing, 34 = Sneeze, 30 = Speech
-    cough_score = float(mean_scores[35]) if len(mean_scores) > 35 else 0.0
-    breathing_score = float(mean_scores[33]) if len(mean_scores) > 33 else 0.0
-    sneeze_score = float(mean_scores[34]) if len(mean_scores) > 34 else 0.0
+    # YAMNet AudioSet class indices — verified from model's own class_map_path:
+    #   36 = Breathing, 37 = Wheeze, 42 = Cough, 43 = Throat clearing, 44 = Sneeze
+    breathing_score = float(mean_scores[36]) if len(mean_scores) > 36 else 0.0
+    wheeze_score    = float(mean_scores[37]) if len(mean_scores) > 37 else 0.0
+    cough_score     = float(mean_scores[42]) if len(mean_scores) > 42 else 0.0
+    throat_score    = float(mean_scores[43]) if len(mean_scores) > 43 else 0.0
+    sneeze_score    = float(mean_scores[44]) if len(mean_scores) > 44 else 0.0
 
     # Derive TB risk as weighted combination of cough indicators
-    tb_risk = min(0.95, cough_score * 0.7 + breathing_score * 0.2 + sneeze_score * 0.1)
+    tb_risk = min(0.95, cough_score * 0.55 + throat_score * 0.20 + wheeze_score * 0.15 + breathing_score * 0.10)
     
     # Acoustic fallback heuristic for loud synthetic or unclassified coughs
     rms = float(np.sqrt(np.mean(waveform ** 2)))
@@ -96,7 +98,7 @@ def predict_yamnet(audio_path: str) -> dict:
         tb_risk = min(0.92, rms * 2.8)
         cough_score = max(cough_score, min(0.95, rms * 3.0))
 
-    asthma_risk = min(0.40, breathing_score * 0.5 + cough_score * 0.1)
+    asthma_risk = min(0.50, wheeze_score * 0.50 + breathing_score * 0.30 + cough_score * 0.10)
     normal = max(0.0, 1.0 - tb_risk - asthma_risk)
 
     duration = len(waveform) / sr
