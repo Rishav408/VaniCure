@@ -5,7 +5,8 @@ import {
   ChevronRight, Languages, Heart, Upload
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { predictAudio, checkHealth, type PredictResponse } from "../services/api";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, LabelList } from "recharts";
+import { predictAudio, checkHealth, type PredictResponse, type PipelineInfo } from "../services/api";
 import { saveScreening } from "../store/screeningStore";
 
 type Stage = "form" | "idle" | "recording" | "processing" | "triage" | "result";
@@ -25,6 +26,12 @@ interface ModelDisplayResult {
   asthma_risk: number;
   normal: number;
   placeholder?: boolean;
+  accuracy?: number;
+  f1?: number;
+  latency_ms?: number;
+  started_at_ms?: number;
+  finished_at_ms?: number;
+  execution_order?: number;
   available: boolean;
 }
 
@@ -111,6 +118,12 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
   const [modelResults, setModelResults]   = useState<ModelDisplayResult[]>([]);
   const [errorMessage, setErrorMessage]   = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [executionMode, setExecutionMode] = useState<"sequential" | "parallel">("parallel");
+  const [completedExecutionMode, setCompletedExecutionMode] = useState<string | null>(null);
+  const [totalLatency, setTotalLatency]   = useState<number | null>(null);
+  const [pipelineA, setPipelineA]         = useState<PipelineInfo | null>(null);
+  const [pipelineB, setPipelineB]         = useState<PipelineInfo | null>(null);
+  const [pipelineC, setPipelineC]         = useState<PipelineInfo | null>(null);
 
   // Real waveform via Web Audio API
   const waveformBarsRef = useRef<number[]>(Array(40).fill(5));
@@ -224,24 +237,35 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
         setProgress(currentProgress);
       }, 60);
 
-      const response: PredictResponse = await predictAudio(audioBlob);
+      const response: PredictResponse = await predictAudio(audioBlob, executionMode);
+      setTotalLatency(response.total_latency_ms);
+      setCompletedExecutionMode(response.execution_mode);
+      setPipelineA(response.pipeline_a);
+      setPipelineB(response.pipeline_b);
+      setPipelineC(response.pipeline_c);
+
+      const extractModel = (r: any, fallback: string): ModelDisplayResult => ({
+        model: r?.model || fallback,
+        tb_risk: r?.tb_risk ?? 0,
+        asthma_risk: r?.asthma_risk ?? 0,
+        normal: r?.normal ?? 0,
+        placeholder: r?.placeholder ?? true,
+        accuracy: r?.accuracy,
+        f1: r?.f1,
+        latency_ms: r?.latency_ms,
+        started_at_ms: r?.started_at_ms,
+        finished_at_ms: r?.finished_at_ms,
+        execution_order: r?.execution_order,
+        available: !!r,
+      });
+
       const results: ModelDisplayResult[] = [
-        {
-          model: response.panns.model || "PANNs-CNN14",
-          tb_risk: response.panns.tb_risk, asthma_risk: response.panns.asthma_risk,
-          normal: response.panns.normal, placeholder: response.panns.placeholder, available: true,
-        },
-        {
-          model: response.yamnet.model || "YAMNet",
-          tb_risk: response.yamnet.tb_risk, asthma_risk: response.yamnet.asthma_risk,
-          normal: response.yamnet.normal, placeholder: response.yamnet.placeholder, available: true,
-        },
-        {
-          model: response.cnn_bilstm?.model || "CNN-BiLSTM",
-          tb_risk: response.cnn_bilstm?.tb_risk ?? 0, asthma_risk: response.cnn_bilstm?.asthma_risk ?? 0,
-          normal: response.cnn_bilstm?.normal ?? 0, placeholder: response.cnn_bilstm?.placeholder ?? true,
-          available: !!response.cnn_bilstm,
-        },
+        extractModel(response.panns, "PANNs-CNN14"),
+        extractModel(response.yamnet, "YAMNet"),
+        extractModel(response.cnn_bilstm, "CNN-BiLSTM"),
+        extractModel(response.resnet, "ResNet-Audio"),
+        extractModel(response.mobilenet, "MobileNet-Audio"),
+        extractModel(response.tinycnn, "TinyCNN-Audio"),
       ];
       
       if (progressTimer) clearInterval(progressTimer);
@@ -359,6 +383,11 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
     setSaved(false);
     setChatInput("");
     setMessages([]);
+    setTotalLatency(null);
+    setCompletedExecutionMode(null);
+    setPipelineA(null);
+    setPipelineB(null);
+    setPipelineC(null);
     userMessageCountRef.current = 0;
     setPatientForm({ name: "", age: "", gender: "M", location: "", complaint: COMPLAINTS[0] });
   };
@@ -392,6 +421,26 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
               >{LANG_LABELS[l]}</button>
             ))}
           </div>
+          {/* Execution Mode Toggle */}
+          <div className="flex items-center bg-zinc-100 dark:bg-zinc-800 rounded-xl p-1 border border-zinc-200 dark:border-white/5">
+            <button
+              onClick={() => setExecutionMode("parallel")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                executionMode === "parallel"
+                  ? "bg-white dark:bg-zinc-700 text-medical-600 dark:text-medical-400 shadow-sm border border-black/5"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >Parallel</button>
+            <button
+              onClick={() => setExecutionMode("sequential")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                executionMode === "sequential"
+                  ? "bg-white dark:bg-zinc-700 text-medical-600 dark:text-medical-400 shadow-sm border border-black/5"
+                  : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              }`}
+            >Sequential</button>
+          </div>
+
           {/* Backend status */}
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
             backendOnline === true
@@ -645,44 +694,228 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
               </div>
 
               {/* Pipeline Visualization */}
-              <div className="glass-card p-6 border border-zinc-200 dark:border-white/5 flex-1 flex flex-col relative overflow-hidden">
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-5 flex items-center gap-2">
-                  <Cpu className="w-4 h-4 text-medical-600 dark:text-medical-400" />
-                  Multi-Model Inference Pipeline
-                </h3>
-                <div className="flex-1 flex flex-col justify-center gap-4 relative">
-                  <div className="absolute left-6 top-4 bottom-4 w-px bg-zinc-200 dark:bg-zinc-800" />
-                  {[
-                    { title: "Audio Preprocessing",    desc: "Resampling 32kHz / 16kHz / 22kHz, mono",    active: progress > 0,  done: progress > 20 },
-                    { title: "PANNs CNN14 Inference",  desc: "AudioSet pretrained — 527-class tagging",   active: progress > 20, done: progress > 45 },
-                    { title: "YAMNet Inference",       desc: "MobileNet audio event classification",      active: progress > 45, done: progress > 70 },
-                    { title: "CNN-BiLSTM Inference",   desc: "Custom Coswara-trained respiratory model",  active: progress > 70, done: progress > 90 },
-                    { title: "Risk Score Aggregation", desc: "Ensemble of 3 models → risk summary",       active: progress > 90, done: progress >= 100 },
-                  ].map((step, idx) => (
-                    <div key={idx} className="relative flex items-start gap-4 z-10">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors duration-500 ${
-                        step.done
-                          ? "bg-medical-50 dark:bg-medical-500/20 border border-medical-200 dark:border-medical-500/50 text-medical-600 dark:text-medical-400"
-                          : step.active
-                          ? "bg-blue-50 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/50 text-blue-600 dark:text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.15)]"
-                          : "bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/5 text-zinc-400 dark:text-zinc-600"
-                      }`}>
-                        {step.done ? <CheckCircle2 className="w-4 h-4" /> : <Activity className={`w-4 h-4 ${step.active ? "animate-pulse" : ""}`} />}
+              <div className="glass-card p-5 border border-zinc-200 dark:border-white/5 flex-1 flex flex-col relative overflow-hidden">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-medical-600 dark:text-medical-400" />
+                    Two-Pipeline Architecture
+                  </h3>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                    executionMode === "parallel"
+                      ? "bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30"
+                      : "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/30"
+                  }`}>
+                    {executionMode === "parallel" ? "⚡ Both Pipelines Parallel" : "→ Pipeline A then B"}
+                  </span>
+                </div>
+
+                <div className="flex-1 flex flex-col justify-center gap-3">
+                  {/* Step 1: Audio Preprocessing */}
+                  {(() => {
+                    const done = progress > 10; const active = progress > 0 && !done;
+                    return (
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-500 ${
+                          done ? "bg-medical-50 dark:bg-medical-500/20 border border-medical-200 dark:border-medical-500/50 text-medical-600 dark:text-medical-400"
+                          : active ? "bg-blue-50 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/50 text-blue-600 dark:text-blue-400"
+                          : "bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/5 text-zinc-400"
+                        }`}>
+                          {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Activity className={`w-3.5 h-3.5 ${active ? "animate-pulse" : ""}`} />}
+                        </div>
+                        <div>
+                          <h4 className={`text-xs font-semibold ${active || done ? "text-zinc-900 dark:text-white" : "text-zinc-400"}`}>Audio Preprocessing</h4>
+                          <p className={`text-[10px] ${active || done ? "text-zinc-500" : "text-zinc-400 dark:text-zinc-600"}`}>Resampling 32kHz / 16kHz / 22kHz, mono</p>
+                        </div>
                       </div>
-                      <div className="flex-1 pt-1">
-                        <h4 className={`text-xs font-semibold transition-colors ${step.active || step.done ? "text-zinc-900 dark:text-white" : "text-zinc-400"}`}>{step.title}</h4>
-                        <p className={`text-xs mt-0.5 transition-colors ${step.active || step.done ? "text-zinc-500 dark:text-zinc-400" : "text-zinc-400 dark:text-zinc-600"}`}>{step.desc}</p>
-                        {step.active && !step.done && (
-                          <div className="h-1 w-24 bg-zinc-200 dark:bg-zinc-800 rounded-full mt-2 overflow-hidden">
-                            <div className="h-full bg-blue-500 rounded-full animate-pulse w-3/5" />
+                    );
+                  })()}
+
+                  {/* Step 2: Two Pipeline Groups */}
+                  <div className={`flex ${executionMode === "parallel" ? "flex-row gap-3" : "flex-col gap-3"}`}>
+
+                    {/* Pipeline A: Original (PANNs + YAMNet + CNN-BiLSTM) */}
+                    {(() => {
+                      const paActive = executionMode === "parallel" ? progress > 10 && progress < 90 : progress > 10 && progress < 50;
+                      const paDone = executionMode === "parallel" ? progress >= 90 : progress >= 50;
+                      return (
+                        <div className={`flex-1 rounded-xl border-2 border-dashed p-3 transition-all duration-500 ${
+                          paDone ? "border-medical-300 dark:border-medical-500/40 bg-medical-50/30 dark:bg-medical-500/5"
+                          : paActive ? "border-blue-300 dark:border-blue-500/40 bg-blue-50/30 dark:bg-blue-500/5"
+                          : "border-zinc-200 dark:border-zinc-700"
+                        }`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">Pipeline A (Original)</p>
+                            {paDone && pipelineA && (
+                              <span className="text-[9px] font-mono text-medical-600 dark:text-medical-400">{pipelineA.latency_ms}ms</span>
+                            )}
+                          </div>
+                          <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mb-2">3 models in parallel (asyncio.gather)</p>
+                          <div className="space-y-1.5">
+                            {[
+                              { name: "PANNs CNN14", idx: 0 },
+                              { name: "YAMNet", idx: 1 },
+                              { name: "CNN-BiLSTM", idx: 2 },
+                            ].map(m => {
+                              const r = modelResults[m.idx];
+                              return (
+                                <div key={m.idx} className={`flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] transition-all ${
+                                  paDone ? "bg-medical-50 dark:bg-medical-500/10 border border-medical-200 dark:border-medical-500/30"
+                                  : paActive ? "bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30"
+                                  : "bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-white/5"
+                                }`}>
+                                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${paDone ? "bg-medical-500" : paActive ? "bg-blue-500 animate-pulse" : "bg-zinc-300"}`} />
+                                  <span className={`font-semibold ${paDone ? "text-medical-700 dark:text-medical-400" : paActive ? "text-blue-700 dark:text-blue-400" : "text-zinc-400"}`}>{m.name}</span>
+                                  {paDone && r?.latency_ms && <span className="ml-auto font-mono text-medical-600 dark:text-medical-400 text-[9px]">{r.latency_ms}ms</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {paDone && pipelineA && (
+                            <div className="mt-2 pt-2 border-t border-medical-200 dark:border-medical-500/20 flex items-center justify-between">
+                              <span className="text-[9px] text-zinc-500">Ensemble:</span>
+                              <div className="flex gap-1.5">
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-medical-100 dark:bg-medical-500/20 text-medical-700 dark:text-medical-400 border border-medical-200 dark:border-medical-500/30">Acc: {pipelineA.ensemble_accuracy}%</span>
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-medical-100 dark:bg-medical-500/20 text-medical-700 dark:text-medical-400 border border-medical-200 dark:border-medical-500/30">F1: {pipelineA.ensemble_f1}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {executionMode === "sequential" && (
+                      <div className="flex items-center justify-center">
+                        <div className="text-[10px] font-bold text-amber-500 px-3 py-1 rounded-full bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30">
+                          → then
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pipeline B: New (ResNet + MobileNet + TinyCNN) */}
+                    {(() => {
+                      const pbActive = executionMode === "parallel" ? progress > 10 && progress < 90 : progress >= 50 && progress < 90;
+                      const pbDone = progress >= 90;
+                      return (
+                        <div className={`flex-1 rounded-xl border-2 border-dashed p-3 transition-all duration-500 ${
+                          pbDone ? "border-violet-300 dark:border-violet-500/40 bg-violet-50/30 dark:bg-violet-500/5"
+                          : pbActive ? "border-blue-300 dark:border-blue-500/40 bg-blue-50/30 dark:bg-blue-500/5"
+                          : "border-zinc-200 dark:border-zinc-700"
+                        }`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">Pipeline B (New)</p>
+                            {pbDone && pipelineB && (
+                              <span className="text-[9px] font-mono text-violet-600 dark:text-violet-400">{pipelineB.latency_ms}ms</span>
+                            )}
+                          </div>
+                          <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mb-2">3 models in parallel (asyncio.gather)</p>
+                          <div className="space-y-1.5">
+                            {[
+                              { name: "ResNet18", idx: 3 },
+                              { name: "MobileNetV2", idx: 4 },
+                              { name: "TinyCNN", idx: 5 },
+                            ].map(m => {
+                              const r = modelResults[m.idx];
+                              return (
+                                <div key={m.idx} className={`flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] transition-all ${
+                                  pbDone ? "bg-violet-50 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/30"
+                                  : pbActive ? "bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/30"
+                                  : "bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-white/5"
+                                }`}>
+                                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${pbDone ? "bg-violet-500" : pbActive ? "bg-blue-500 animate-pulse" : "bg-zinc-300"}`} />
+                                  <span className={`font-semibold ${pbDone ? "text-violet-700 dark:text-violet-400" : pbActive ? "text-blue-700 dark:text-blue-400" : "text-zinc-400"}`}>{m.name}</span>
+                                  {pbDone && r?.latency_ms && <span className="ml-auto font-mono text-violet-600 dark:text-violet-400 text-[9px]">{r.latency_ms}ms</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {pbDone && pipelineB && (
+                            <div className="mt-2 pt-2 border-t border-violet-200 dark:border-violet-500/20 flex items-center justify-between">
+                              <span className="text-[9px] text-zinc-500">Ensemble:</span>
+                              <div className="flex gap-1.5">
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-500/30">Acc: {pipelineB.ensemble_accuracy}%</span>
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-500/30">F1: {pipelineB.ensemble_f1}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Pipeline C: Combined Ensemble (all 6 models) */}
+                  {(() => {
+                    const pcDone = progress >= 95;
+                    const pcActive = progress > 90 && !pcDone;
+                    return (
+                      <div className={`rounded-xl border-2 p-3 transition-all duration-500 ${
+                        pcDone ? "border-emerald-300 dark:border-emerald-500/40 bg-gradient-to-r from-emerald-50/50 to-teal-50/50 dark:from-emerald-500/5 dark:to-teal-500/5"
+                        : pcActive ? "border-blue-300 dark:border-blue-500/40 bg-blue-50/20 dark:bg-blue-500/5"
+                        : "border-zinc-200 dark:border-zinc-700 border-dashed"
+                      }`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-6 h-6 rounded-md flex items-center justify-center ${pcDone ? "bg-emerald-100 dark:bg-emerald-500/20" : "bg-zinc-100 dark:bg-zinc-800"}`}>
+                              {pcDone ? <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> : <Activity className={`w-3 h-3 ${pcActive ? "animate-pulse text-blue-500" : "text-zinc-400"}`} />}
+                            </div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">Pipeline C (Combined Ensemble)</p>
+                          </div>
+                          {pcDone && pipelineC && (
+                            <span className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400">{pipelineC.latency_ms}ms</span>
+                          )}
+                        </div>
+                        <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mb-2">Weighted average of all 6 models from A + B</p>
+
+                        {/* Model pills grid */}
+                        <div className="grid grid-cols-3 gap-1 mb-2">
+                          {["PANNs","YAMNet","BiLSTM","ResNet","MobNet","Tiny"].map((name, i) => (
+                            <div key={i} className={`text-center px-1 py-0.5 rounded text-[8px] font-bold transition-all ${
+                              pcDone ? "bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30"
+                              : pcActive ? "bg-blue-50 dark:bg-blue-500/10 text-blue-500 border border-blue-200 dark:border-blue-500/30"
+                              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border border-zinc-200 dark:border-white/5"
+                            }`}>
+                              {name}
+                            </div>
+                          ))}
+                        </div>
+
+                        {pcDone && pipelineC && (
+                          <div className="pt-2 border-t border-emerald-200 dark:border-emerald-500/20 flex items-center justify-between">
+                            <span className="text-[9px] text-zinc-500">Best Ensemble:</span>
+                            <div className="flex gap-1.5">
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 font-bold">Acc: {pipelineC.ensemble_accuracy}%</span>
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 font-bold">F1: {pipelineC.ensemble_f1}</span>
+                            </div>
                           </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })()}
+
+                  {/* Final Output step */}
+                  {(() => {
+                    const done = progress >= 100; const active = progress > 95 && !done;
+                    return (
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-500 ${
+                          done ? "bg-gradient-to-br from-medical-500 to-emerald-500 text-white shadow-lg shadow-medical-500/20"
+                          : active ? "bg-blue-50 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/50 text-blue-600 dark:text-blue-400"
+                          : "bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/5 text-zinc-400"
+                        }`}>
+                          {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Activity className={`w-3.5 h-3.5 ${active ? "animate-pulse" : ""}`} />}
+                        </div>
+                        <div>
+                          <h4 className={`text-xs font-semibold ${active || done ? "text-zinc-900 dark:text-white" : "text-zinc-400"}`}>Final Risk Output</h4>
+                          <p className={`text-[10px] ${active || done ? "text-zinc-500" : "text-zinc-400 dark:text-zinc-600"}`}>3 pipelines → A vs B vs C comparison → risk report</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 {stage === "processing" && (
-                  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-medical-500/5 to-transparent h-1/2 animate-scanline pointer-events-none" />
+                  <>
+                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-medical-500/5 to-transparent h-1/2 animate-scanline pointer-events-none" />
+                    <div className="absolute inset-0 rounded-xl ring-1 ring-blue-400/20 dark:ring-blue-500/10 animate-pulse pointer-events-none" />
+                  </>
                 )}
               </div>
             </div>
@@ -752,42 +985,178 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
                   <motion.div initial={{ opacity: 0, height: 0, y: 20 }} animate={{ opacity: 1, height: "auto", y: 0 }} className="flex flex-col gap-5">
                     {/* Model Comparison */}
                     <div className="glass-card p-5 border border-zinc-200 dark:border-white/5">
-                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white mb-4 flex items-center gap-2">
-                        <Cpu className="w-4 h-4 text-medical-600 dark:text-medical-400" />Model Comparison
-                      </h3>
-                      <div className="space-y-3">
-                        {modelResults.map((result, i) => (
-                          <div key={i} className={`p-3.5 rounded-xl border ${!result.available ? "opacity-50 border-dashed border-zinc-300 dark:border-zinc-700" : "border-zinc-200 dark:border-white/5 bg-white/50 dark:bg-zinc-900/50"}`}>
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <div className={`w-1.5 h-1.5 rounded-full ${!result.available ? "bg-zinc-400" : result.placeholder ? "bg-amber-500 animate-pulse" : "bg-medical-500"}`} />
-                                <span className="text-xs font-semibold text-zinc-900 dark:text-white">{result.model}</span>
-                              </div>
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${result.placeholder ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-medical-100 dark:bg-medical-500/20 text-medical-600 dark:text-medical-400"}`}>
-                                {result.placeholder ? "Placeholder" : "Live"}
-                              </span>
-                            </div>
-                            {result.available && (
-                              <div className="grid grid-cols-3 gap-2">
-                                {[
-                                  { label: "TB Risk", val: result.tb_risk, color: "bg-red-500" },
-                                  { label: "Asthma", val: result.asthma_risk, color: "bg-amber-500" },
-                                  { label: "Normal", val: result.normal, color: "bg-medical-500" },
-                                ].map(({ label, val, color }) => (
-                                  <div key={label}>
-                                    <div className="flex justify-between text-[10px] mb-1">
-                                      <span className="text-zinc-500">{label}</span>
-                                      <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{fmt(val)}</span>
-                                    </div>
-                                    <div className="h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                                      <div className={`h-full ${color} rounded-full transition-all duration-1000`} style={{ width: fmt(val) }} />
-                                    </div>
-                                  </div>
-                                ))}
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+                          <Cpu className="w-4 h-4 text-medical-600 dark:text-medical-400" />Model Comparison
+                        </h3>
+                        {totalLatency && (
+                          <div className="flex items-center gap-2">
+                            {completedExecutionMode && (
+                              <div className={`text-[10px] font-bold font-mono px-2.5 py-1 rounded-full border ${
+                                completedExecutionMode === "parallel"
+                                  ? "bg-blue-100 dark:bg-blue-500/20 border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400"
+                                  : "bg-amber-100 dark:bg-amber-500/20 border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-400"
+                              }`}>
+                                {completedExecutionMode === "parallel" ? "⚡ Parallel" : "→ Sequential"}
                               </div>
                             )}
+                            <div className="text-xs font-medium font-mono px-2.5 py-1 rounded-full border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400">
+                              Total: {totalLatency} ms
+                            </div>
                           </div>
-                        ))}
+                        )}
+                      </div>
+
+                      {/* Execution Timeline & Graphical Comparison */}
+                      {totalLatency && modelResults.some(r => r.started_at_ms != null) && (
+                        <div className="mb-4">
+                          {/* Recharts Execution Timeline (Gantt) */}
+                          <div className="p-4 rounded-xl bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-900/50 dark:to-zinc-800/20 border border-zinc-200 dark:border-white/5 mb-4">
+                            <h4 className="text-[11px] font-bold text-zinc-600 dark:text-zinc-300 uppercase tracking-wide mb-3 flex items-center justify-between">
+                              Execution Timeline
+                              <span className="text-[9px] lowercase font-mono bg-white dark:bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-white/10">{completedExecutionMode}</span>
+                            </h4>
+                            <div className="h-[220px] w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                  data={modelResults.filter(r => r.available)}
+                                  layout="vertical"
+                                  margin={{ top: 0, right: 20, left: -20, bottom: 0 }}
+                                >
+                                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="currentColor" className="text-zinc-200 dark:text-white/10" />
+                                  <XAxis type="number" domain={[0, totalLatency]} tickFormatter={(val) => `${val}ms`} style={{ fontSize: '10px' }} stroke="currentColor" className="text-zinc-400" />
+                                  <YAxis type="category" dataKey="model" style={{ fontSize: '10px', fontWeight: 600 }} stroke="currentColor" className="text-zinc-500" width={80} />
+                                  <Tooltip
+                                    cursor={{fill: 'transparent'}}
+                                    content={({ active, payload }) => {
+                                      if (active && payload && payload.length) {
+                                        const d = payload[0].payload;
+                                        return (
+                                          <div className="bg-white dark:bg-zinc-800 p-2 border border-zinc-200 dark:border-zinc-700 shadow-xl rounded-lg text-xs">
+                                            <p className="font-bold text-zinc-800 dark:text-white mb-1">{d.model}</p>
+                                            <p className="text-zinc-500">Started: <span className="font-mono">{d.started_at_ms}</span>ms</p>
+                                            <p className="text-zinc-500">Latency: <span className="font-mono text-indigo-600 dark:text-indigo-400">{d.latency_ms}</span>ms</p>
+                                            <p className="text-zinc-500">Finished: <span className="font-mono">{d.finished_at_ms}</span>ms</p>
+                                            {completedExecutionMode === "sequential" && <p className="text-amber-600 dark:text-amber-400 font-bold mt-1">Order: #{d.execution_order}</p>}
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    }}
+                                  />
+                                  {/* Dummy bar to push start point */}
+                                  <Bar dataKey="started_at_ms" stackId="a" fill="transparent" />
+                                  {/* Actual duration bar */}
+                                  <Bar dataKey="latency_ms" stackId="a" radius={[0, 4, 4, 0]}>
+                                    {modelResults.filter(r => r.available).map((entry, index) => (
+                                      <Cell key={`cell-${index}`} fill={completedExecutionMode === "parallel" ? "#3b82f6" : "#f59e0b"} />
+                                    ))}
+                                    <LabelList dataKey="latency_ms" position="right" formatter={(v: number) => `${v}ms`} style={{ fontSize: '9px', fill: '#6b7280' }} />
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+
+                          {/* Recharts Model Accuracy Comparison */}
+                          <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50/50 to-teal-50/30 dark:from-emerald-900/10 dark:to-teal-900/10 border border-emerald-200 dark:border-emerald-500/20">
+                            <h4 className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide mb-3">Model Accuracy Comparison</h4>
+                            <div className="h-[200px] w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                  data={modelResults.filter(r => r.available && r.accuracy)}
+                                  margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+                                >
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-zinc-200 dark:text-white/10" />
+                                  <XAxis dataKey="model" style={{ fontSize: '9px', fontWeight: 600 }} stroke="currentColor" className="text-zinc-500" />
+                                  <YAxis domain={[60, 100]} style={{ fontSize: '10px' }} tickFormatter={(v) => `${v}%`} stroke="currentColor" className="text-zinc-400" />
+                                  <Tooltip
+                                    cursor={{fill: 'rgba(0,0,0,0.05)'}}
+                                    content={({ active, payload }) => {
+                                      if (active && payload && payload.length) {
+                                        const d = payload[0].payload;
+                                        return (
+                                          <div className="bg-white dark:bg-zinc-800 p-2 border border-zinc-200 dark:border-zinc-700 shadow-xl rounded-lg text-xs">
+                                            <p className="font-bold text-zinc-800 dark:text-white mb-1">{d.model}</p>
+                                            <p className="text-zinc-500">Accuracy: <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{d.accuracy}%</span></p>
+                                            <p className="text-zinc-500">F1 Score: <span className="font-mono">{d.f1}</span></p>
+                                            <p className="text-zinc-500 mt-1">Status: <span className={`font-bold ${d.placeholder ? "text-amber-500": "text-medical-500"}`}>{d.placeholder ? "Placeholder" : "Live"}</span></p>
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    }}
+                                  />
+                                  <Bar dataKey="accuracy" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                                    {modelResults.filter(r => r.available && r.accuracy).map((entry, index) => (
+                                      <Cell key={`cell-${index}`} fill={entry.placeholder ? "#fcd34d" : "#10b981"} />
+                                    ))}
+                                    <LabelList dataKey="accuracy" position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: '9px', fill: '#059669', fontWeight: 'bold' }} />
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {modelResults.map((result, i) => (
+                            <div key={i} className={`p-3.5 rounded-xl border ${!result.available ? "opacity-50 border-dashed border-zinc-300 dark:border-zinc-700" : "border-zinc-200 dark:border-white/5 bg-white/50 dark:bg-zinc-900/50"}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-1.5 h-1.5 rounded-full ${!result.available ? "bg-zinc-400" : result.placeholder ? "bg-amber-500 animate-pulse" : "bg-medical-500"}`} />
+                                  <span className="text-xs font-semibold text-zinc-900 dark:text-white">{result.model}</span>
+                                  {completedExecutionMode === "sequential" && result.execution_order && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold border border-amber-200 dark:border-amber-500/30">
+                                      #{result.execution_order}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                  {result.accuracy != null && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-mono border border-zinc-200 dark:border-white/5">
+                                      Acc: {result.accuracy}%
+                                    </span>
+                                  )}
+                                  {result.f1 != null && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-mono border border-zinc-200 dark:border-white/5">
+                                      F1: {result.f1}
+                                    </span>
+                                  )}
+                                  {result.latency_ms != null && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono border border-indigo-200 dark:border-indigo-500/30">
+                                      {result.latency_ms}ms
+                                    </span>
+                                  )}
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${result.placeholder ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-medical-100 dark:bg-medical-500/20 text-medical-600 dark:text-medical-400"}`}>
+                                    {result.placeholder ? "Placeholder" : "Live"}
+                                  </span>
+                                </div>
+                              </div>
+                              {result.available && (
+                                <div className="grid grid-cols-3 gap-2">
+                                  {[
+                                    { label: "TB Risk", val: result.tb_risk, color: "bg-red-500" },
+                                    { label: "Asthma", val: result.asthma_risk, color: "bg-amber-500" },
+                                    { label: "Normal", val: result.normal, color: "bg-medical-500" },
+                                  ].map(({ label, val, color }) => (
+                                    <div key={label}>
+                                      <div className="flex justify-between text-[10px] mb-1">
+                                        <span className="text-zinc-500">{label}</span>
+                                        <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{fmt(val)}</span>
+                                      </div>
+                                      <div className="h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                        <div className={`h-full ${color} rounded-full transition-all duration-1000`} style={{ width: fmt(val) }} />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
