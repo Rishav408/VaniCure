@@ -1058,40 +1058,50 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
                             </div>
                           </div>
 
-                          {/* Recharts Model Accuracy Comparison */}
+                          {/* Pipeline Accuracy Comparison */}
                           <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50/50 to-teal-50/30 dark:from-emerald-900/10 dark:to-teal-900/10 border border-emerald-200 dark:border-emerald-500/20">
-                            <h4 className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide mb-3">Model Accuracy Comparison</h4>
-                            <div className="h-[200px] w-full">
+                            <h4 className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide mb-3">Pipeline Accuracy Comparison</h4>
+                            <div className="h-[250px] w-full">
                               <ResponsiveContainer width="100%" height="100%">
                                 <BarChart
-                                  data={modelResults.filter(r => r.available && r.accuracy)}
-                                  margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+                                  data={[
+                                    ...(pipelineA ? [{ name: "Pipeline A", accuracy: pipelineA.ensemble_accuracy, f1: pipelineA.ensemble_f1, models: "PANNs + YAMNet + CNN-BiLSTM", color: "#14b8a6", latency: pipelineA.latency_ms }] : []),
+                                    ...(pipelineB ? [{ name: "Pipeline B", accuracy: pipelineB.ensemble_accuracy, f1: pipelineB.ensemble_f1, models: "ResNet + MobileNet + TinyCNN", color: "#8b5cf6", latency: pipelineB.latency_ms }] : []),
+                                    ...(pipelineC ? [{ name: "Pipeline C", accuracy: pipelineC.ensemble_accuracy, f1: pipelineC.ensemble_f1, models: "All 6 Models Combined", color: "#10b981", latency: pipelineC.latency_ms }] : []),
+                                  ]}
+                                  margin={{ top: 25, right: 10, left: -10, bottom: 5 }}
                                 >
                                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-zinc-200 dark:text-white/10" />
-                                  <XAxis dataKey="model" style={{ fontSize: '9px', fontWeight: 600 }} stroke="currentColor" className="text-zinc-500" />
-                                  <YAxis domain={[60, 100]} style={{ fontSize: '10px' }} tickFormatter={(v) => `${v}%`} stroke="currentColor" className="text-zinc-400" />
+                                  <XAxis dataKey="name" style={{ fontSize: '10px', fontWeight: 700 }} stroke="currentColor" className="text-zinc-500" />
+                                  <YAxis domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} style={{ fontSize: '10px' }} tickFormatter={(v) => `${v}%`} stroke="currentColor" className="text-zinc-400" />
                                   <Tooltip
                                     cursor={{fill: 'rgba(0,0,0,0.05)'}}
                                     content={({ active, payload }) => {
                                       if (active && payload && payload.length) {
                                         const d = payload[0].payload;
                                         return (
-                                          <div className="bg-white dark:bg-zinc-800 p-2 border border-zinc-200 dark:border-zinc-700 shadow-xl rounded-lg text-xs">
-                                            <p className="font-bold text-zinc-800 dark:text-white mb-1">{d.model}</p>
-                                            <p className="text-zinc-500">Accuracy: <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{d.accuracy}%</span></p>
-                                            <p className="text-zinc-500">F1 Score: <span className="font-mono">{d.f1}</span></p>
-                                            <p className="text-zinc-500 mt-1">Status: <span className={`font-bold ${d.placeholder ? "text-amber-500": "text-medical-500"}`}>{d.placeholder ? "Placeholder" : "Live"}</span></p>
+                                          <div className="bg-white dark:bg-zinc-800 p-3 border border-zinc-200 dark:border-zinc-700 shadow-xl rounded-lg text-xs">
+                                            <p className="font-bold text-zinc-800 dark:text-white mb-1">{d.name}</p>
+                                            <p className="text-zinc-400 text-[10px] mb-2 italic">{d.models}</p>
+                                            <p className="text-zinc-500">Ensemble Accuracy: <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{d.accuracy}%</span></p>
+                                            <p className="text-zinc-500">Ensemble F1: <span className="font-mono font-bold">{d.f1}</span></p>
+                                            <p className="text-zinc-500">Latency: <span className="font-mono text-indigo-600 dark:text-indigo-400">{d.latency}ms</span></p>
                                           </div>
                                         );
                                       }
                                       return null;
                                     }}
                                   />
-                                  <Bar dataKey="accuracy" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                                    {modelResults.filter(r => r.available && r.accuracy).map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={entry.placeholder ? "#fcd34d" : "#10b981"} />
+                                  <ReferenceLine y={85} stroke="#059669" strokeDasharray="6 3" strokeWidth={1.5} label={{ value: 'Target 85%', position: 'right', style: { fontSize: '9px', fill: '#059669', fontWeight: 'bold' } }} />
+                                  <Bar dataKey="accuracy" radius={[6, 6, 0, 0]} maxBarSize={60}>
+                                    {[
+                                      ...(pipelineA ? [{ color: "#14b8a6" }] : []),
+                                      ...(pipelineB ? [{ color: "#8b5cf6" }] : []),
+                                      ...(pipelineC ? [{ color: "#10b981" }] : []),
+                                    ].map((entry, index) => (
+                                      <Cell key={`cell-${index}`} fill={entry.color} />
                                     ))}
-                                    <LabelList dataKey="accuracy" position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: '9px', fill: '#059669', fontWeight: 'bold' }} />
+                                    <LabelList dataKey="accuracy" position="top" formatter={(v: number) => `${v}%`} style={{ fontSize: '11px', fill: '#059669', fontWeight: 'bold' }} />
                                   </Bar>
                                 </BarChart>
                               </ResponsiveContainer>
@@ -1100,63 +1110,145 @@ export function DiagnosticAgent({ onNavigate }: { onNavigate?: (view: string) =>
                         </div>
                       )}
 
-                      <div className="space-y-3">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {modelResults.map((result, i) => (
-                            <div key={i} className={`p-3.5 rounded-xl border ${!result.available ? "opacity-50 border-dashed border-zinc-300 dark:border-zinc-700" : "border-zinc-200 dark:border-white/5 bg-white/50 dark:bg-zinc-900/50"}`}>
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="flex items-center gap-2">
-                                  <div className={`w-1.5 h-1.5 rounded-full ${!result.available ? "bg-zinc-400" : result.placeholder ? "bg-amber-500 animate-pulse" : "bg-medical-500"}`} />
-                                  <span className="text-xs font-semibold text-zinc-900 dark:text-white">{result.model}</span>
-                                  {completedExecutionMode === "sequential" && result.execution_order && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold border border-amber-200 dark:border-amber-500/30">
-                                      #{result.execution_order}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                                  {result.accuracy != null && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-mono border border-zinc-200 dark:border-white/5">
-                                      Acc: {result.accuracy}%
-                                    </span>
-                                  )}
-                                  {result.f1 != null && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 font-mono border border-zinc-200 dark:border-white/5">
-                                      F1: {result.f1}
-                                    </span>
-                                  )}
-                                  {result.latency_ms != null && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-mono border border-indigo-200 dark:border-indigo-500/30">
-                                      {result.latency_ms}ms
-                                    </span>
-                                  )}
-                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${result.placeholder ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-medical-100 dark:bg-medical-500/20 text-medical-600 dark:text-medical-400"}`}>
-                                    {result.placeholder ? "Placeholder" : "Live"}
-                                  </span>
-                                </div>
+                      <div className="space-y-4">
+                        {/* Pipeline A Card */}
+                        {pipelineA && (
+                          <div className="rounded-xl border border-medical-200 dark:border-medical-500/30 bg-medical-50/20 dark:bg-medical-500/5 p-4">
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                              <div className="flex items-center gap-2 mr-auto">
+                                <div className="w-2.5 h-2.5 rounded-full bg-medical-500 shrink-0" />
+                                <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Pipeline A — Original</span>
                               </div>
-                              {result.available && (
-                                <div className="grid grid-cols-3 gap-2">
-                                  {[
-                                    { label: "TB Risk", val: result.tb_risk, color: "bg-red-500" },
-                                    { label: "Asthma", val: result.asthma_risk, color: "bg-amber-500" },
-                                    { label: "Normal", val: result.normal, color: "bg-medical-500" },
-                                  ].map(({ label, val, color }) => (
-                                    <div key={label}>
-                                      <div className="flex justify-between text-[10px] mb-1">
-                                        <span className="text-zinc-500">{label}</span>
-                                        <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{fmt(val)}</span>
-                                      </div>
-                                      <div className="h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                                        <div className={`h-full ${color} rounded-full transition-all duration-1000`} style={{ width: fmt(val) }} />
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-medical-100 dark:bg-medical-500/20 text-medical-700 dark:text-medical-400 border border-medical-200 dark:border-medical-500/30 font-bold whitespace-nowrap">Acc: {pipelineA.ensemble_accuracy}%</span>
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-medical-100 dark:bg-medical-500/20 text-medical-700 dark:text-medical-400 border border-medical-200 dark:border-medical-500/30 font-bold whitespace-nowrap">F1: {pipelineA.ensemble_f1}</span>
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 whitespace-nowrap">{pipelineA.latency_ms}ms</span>
+                              </div>
                             </div>
-                          ))}
-                        </div>
+                            <div className="space-y-2">
+                              {modelResults.slice(0, 3).filter(r => r.available).map((result, i) => (
+                                <div key={i} className="p-3 rounded-lg bg-white/60 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/5">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${result.placeholder ? "bg-amber-500" : "bg-medical-500"}`} />
+                                      <span className="text-[11px] font-semibold text-zinc-900 dark:text-white">{result.model}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      {result.latency_ms != null && <span className="text-[9px] font-mono text-indigo-500 whitespace-nowrap">{result.latency_ms}ms</span>}
+                                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap ${result.placeholder ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-medical-100 dark:bg-medical-500/20 text-medical-600 dark:text-medical-400"}`}>
+                                        {result.placeholder ? "Placeholder" : "Live"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-3">
+                                    {[
+                                      { label: "TB Risk", val: result.tb_risk, color: "bg-red-500" },
+                                      { label: "Asthma", val: result.asthma_risk, color: "bg-amber-500" },
+                                      { label: "Normal", val: result.normal, color: "bg-medical-500" },
+                                    ].map(({ label, val, color }) => (
+                                      <div key={label}>
+                                        <div className="flex justify-between text-[10px] mb-1">
+                                          <span className="text-zinc-500">{label}</span>
+                                          <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{fmt(val)}</span>
+                                        </div>
+                                        <div className="h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                          <div className={`h-full ${color} rounded-full transition-all duration-1000`} style={{ width: fmt(val) }} />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Pipeline B Card */}
+                        {pipelineB && (
+                          <div className="rounded-xl border border-violet-200 dark:border-violet-500/30 bg-violet-50/20 dark:bg-violet-500/5 p-4">
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                              <div className="flex items-center gap-2 mr-auto">
+                                <div className="w-2.5 h-2.5 rounded-full bg-violet-500 shrink-0" />
+                                <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Pipeline B — New</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-500/30 font-bold whitespace-nowrap">Acc: {pipelineB.ensemble_accuracy}%</span>
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-500/20 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-500/30 font-bold whitespace-nowrap">F1: {pipelineB.ensemble_f1}</span>
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 whitespace-nowrap">{pipelineB.latency_ms}ms</span>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              {modelResults.slice(3, 6).filter(r => r.available).map((result, i) => (
+                                <div key={i} className="p-3 rounded-lg bg-white/60 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/5">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${result.placeholder ? "bg-amber-500" : "bg-violet-500"}`} />
+                                      <span className="text-[11px] font-semibold text-zinc-900 dark:text-white">{result.model}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5">
+                                      {result.latency_ms != null && <span className="text-[9px] font-mono text-indigo-500 whitespace-nowrap">{result.latency_ms}ms</span>}
+                                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold whitespace-nowrap ${result.placeholder ? "bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-violet-100 dark:bg-violet-500/20 text-violet-600 dark:text-violet-400"}`}>
+                                        {result.placeholder ? "Placeholder" : "Live"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-3 gap-3">
+                                    {[
+                                      { label: "TB Risk", val: result.tb_risk, color: "bg-red-500" },
+                                      { label: "Asthma", val: result.asthma_risk, color: "bg-amber-500" },
+                                      { label: "Normal", val: result.normal, color: "bg-medical-500" },
+                                    ].map(({ label, val, color }) => (
+                                      <div key={label}>
+                                        <div className="flex justify-between text-[10px] mb-1">
+                                          <span className="text-zinc-500">{label}</span>
+                                          <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{fmt(val)}</span>
+                                        </div>
+                                        <div className="h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                          <div className={`h-full ${color} rounded-full transition-all duration-1000`} style={{ width: fmt(val) }} />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Pipeline C Card */}
+                        {pipelineC && (
+                          <div className="rounded-xl border border-emerald-200 dark:border-emerald-500/30 bg-gradient-to-r from-emerald-50/30 to-teal-50/30 dark:from-emerald-500/5 dark:to-teal-500/5 p-4">
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                              <div className="flex items-center gap-2 mr-auto">
+                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                                <span className="text-xs font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Pipeline C — Combined</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 font-bold whitespace-nowrap">Acc: {pipelineC.ensemble_accuracy}%</span>
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 font-bold whitespace-nowrap">F1: {pipelineC.ensemble_f1}</span>
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 whitespace-nowrap">{pipelineC.latency_ms}ms</span>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              {pipelineC.ensemble_tb_risk != null && [
+                                { label: "Ensemble TB Risk", val: pipelineC.ensemble_tb_risk, color: "bg-red-500" },
+                                { label: "Ensemble Asthma", val: pipelineC.ensemble_asthma_risk ?? 0, color: "bg-amber-500" },
+                                { label: "Ensemble Normal", val: pipelineC.ensemble_normal ?? 0, color: "bg-medical-500" },
+                              ].map(({ label, val, color }) => (
+                                <div key={label} className="p-3 rounded-lg bg-white/60 dark:bg-zinc-900/50 border border-zinc-200 dark:border-white/5">
+                                  <div className="flex justify-between text-[11px] mb-1.5">
+                                    <span className="text-zinc-500 font-medium">{label}</span>
+                                    <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">{fmt(val)}</span>
+                                  </div>
+                                  <div className="h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                    <div className={`h-full ${color} rounded-full transition-all duration-1000`} style={{ width: fmt(val) }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-2 italic">Weighted average of all 6 models (PANNs + YAMNet + CNN-BiLSTM + ResNet18 + MobileNetV2 + TinyCNN)</p>
+                          </div>
+                        )}
                       </div>
                     </div>
 
