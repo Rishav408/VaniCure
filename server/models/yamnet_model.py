@@ -12,30 +12,37 @@ import librosa
 # Lazy-load TensorFlow and model to speed up server startup
 _yamnet_model = None
 _class_names = None
+_load_error = None
 
 
 def _load_yamnet():
     """Lazy-load YAMNet model from TF Hub on first call."""
     global _yamnet_model, _class_names
+    global _load_error
     if _yamnet_model is None:
+        if _load_error is not None:
+            return
+
         import tensorflow_hub as hub
-        import tensorflow as tf
         import csv
         import os
 
         print("[YAMNet] Loading model from TensorFlow Hub...")
-        _yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-
-        # Load class names from the model's assets
-        class_map_path = _yamnet_model.class_map_path().numpy().decode("utf-8")
-        if os.path.exists(class_map_path):
-            with open(class_map_path, "r") as f:
-                reader = csv.DictReader(f)
-                _class_names = [row["display_name"] for row in reader]
-        else:
+        try:
+            _yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
+            # Load class names from the model's assets
+            class_map_path = _yamnet_model.class_map_path().numpy().decode("utf-8")
+            if os.path.exists(class_map_path):
+                with open(class_map_path, "r") as f:
+                    reader = csv.DictReader(f)
+                    _class_names = [row["display_name"] for row in reader]
+            else:
+                _class_names = [f"class_{i}" for i in range(521)]
+            print(f"[YAMNet] Model loaded. {len(_class_names)} classes available.")
+        except Exception as exc:
+            _load_error = str(exc)
             _class_names = [f"class_{i}" for i in range(521)]
-
-        print(f"[YAMNet] Model loaded. {len(_class_names)} classes available.")
+            print(f"[YAMNet] Failed to load TensorFlow Hub model; falling back to placeholders. {exc}")
 
 
 def predict_yamnet(audio_path: str) -> dict:
@@ -48,6 +55,9 @@ def predict_yamnet(audio_path: str) -> dict:
     except Exception as e:
         # If TF/TFHub is not installed, return placeholder results
         return _placeholder_result(audio_path, str(e))
+
+    if _yamnet_model is None:
+        return _placeholder_result(audio_path, _load_error or "YAMNet model is unavailable.")
 
     import tensorflow as tf
 
